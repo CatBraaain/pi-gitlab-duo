@@ -1,0 +1,34 @@
+{
+  "name": "pi-gitlab-duo",
+  "version": "0.1.0",
+  "description": "GitLab Duo provider extension for pi",
+  "type": "module",
+  "license": "MIT",
+  "author": "Mario Zechner",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/badlogic/pi-gitlab-duo.git"
+  },
+  "keywords": [
+    "pi",
+    "gitlab",
+    "gitlab-duo",
+    "ai",
+    "llm",
+    "claude",
+    "gpt"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-ai": ">=0.49.0",
+    "@mariozechner/pi-coding-agent": ">=0.49.0"
+  }
+}
