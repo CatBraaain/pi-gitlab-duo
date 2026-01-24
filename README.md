@@ -6,14 +6,16 @@ Provides access to GitLab Duo AI models (Claude and GPT) through GitLab's AI Gat
 
 ## Models
 
-| Model ID | Backend |
-|----------|---------|
-| `duo-chat-opus-4-5` | Claude Opus 4.5 |
-| `duo-chat-sonnet-4-5` | Claude Sonnet 4.5 |
-| `duo-chat-haiku-4-5` | Claude Haiku 4.5 |
-| `duo-chat-gpt-5-1` | GPT-5.1 |
-| `duo-chat-gpt-5-mini` | GPT-5 Mini |
-| `duo-chat-gpt-5-codex` | GPT-5 Codex |
+| Model ID | Name |
+|----------|------|
+| `claude-opus-4-5-20251101` | Claude Opus 4.5 |
+| `claude-sonnet-4-5-20250929` | Claude Sonnet 4.5 |
+| `claude-haiku-4-5-20251001` | Claude Haiku 4.5 |
+| `gpt-5.1-2025-11-13` | GPT-5.1 |
+| `gpt-5-mini-2025-08-07` | GPT-5 Mini |
+| `gpt-5-codex` | GPT-5 Codex |
+
+All models support extended thinking/reasoning.
 
 ## Installation
 
@@ -38,17 +40,20 @@ Set the `GITLAB_TOKEN` environment variable:
 
 ```bash
 export GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-pi --provider gitlab-duo --model duo-chat-sonnet-4-5
+pi --provider gitlab-duo --model claude-sonnet-4-5-20250929
 ```
 
 ## Usage
 
 ```bash
 # Interactive mode
-pi --provider gitlab-duo --model duo-chat-sonnet-4-5
+pi --provider gitlab-duo --model claude-sonnet-4-5-20250929
+
+# With thinking enabled
+pi --provider gitlab-duo --model claude-sonnet-4-5-20250929 --thinking medium
 
 # Print mode
-pi --provider gitlab-duo --model duo-chat-sonnet-4-5 -p "explain git rebase"
+pi --provider gitlab-duo --model claude-sonnet-4-5-20250929 -p "explain git rebase"
 ```
 
 ## Requirements
