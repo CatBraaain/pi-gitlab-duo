@@ -7,7 +7,7 @@
   "author": "Mario Zechner",
   "repository": {
     "type": "git",
-    "url": "https://github.com/badlogic/pi-gitlab-duo.git"
+    "url": "git+https://github.com/badlogic/pi-gitlab-duo.git"
   },
   "keywords": [
     "pi",
