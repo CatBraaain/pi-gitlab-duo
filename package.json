@@ -1,6 +1,6 @@
 {
   "name": "pi-gitlab-duo",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "GitLab Duo provider extension for pi",
   "type": "module",
   "license": "MIT",
