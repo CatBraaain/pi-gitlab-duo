@@ -9,28 +9,32 @@
  *   # Then /login gitlab-duo, or set GITLAB_TOKEN=glpat-...
  */
 
+import { join } from "node:path";
 import {
 	type Api,
+	anthropicMessagesApi,
 	type AssistantMessageEventStream,
-	type Context,
 	createAssistantMessageEventStream,
 	type Model,
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
 	type SimpleStreamOptions,
-	streamSimpleAnthropic,
-	streamSimpleOpenAIResponses,
-} from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+	openAIResponsesApi,
+	type TranscriptContext,
+} from "@earendil-works/pi-ai/compat";
+import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import {
+	ANTHROPIC_PROXY_URL,
+	catalogRefresher,
+	GATEWAY_URL as AI_GATEWAY_URL,
+	GITLAB_URL as GITLAB_COM_URL,
+	OPENAI_PROXY_URL,
+	oauthCatalogOwner,
+} from "./catalog.ts";
 
 // =============================================================================
 // Constants
 // =============================================================================
-
-const GITLAB_COM_URL = "https://gitlab.com";
-const AI_GATEWAY_URL = "https://cloud.gitlab.com";
-const ANTHROPIC_PROXY_URL = `${AI_GATEWAY_URL}/ai/v1/proxy/anthropic/`;
-const OPENAI_PROXY_URL = `${AI_GATEWAY_URL}/ai/v1/proxy/openai/v1`;
 
 const BUNDLED_CLIENT_ID = "da4edff2e6ebd2bc3208611e2768bc1c1dd7be791dc5ff26ca34ca9ee44f7d4b";
 const OAUTH_SCOPES = ["api"];
@@ -38,15 +42,12 @@ const REDIRECT_URI = "http://127.0.0.1:8080/callback";
 const DIRECT_ACCESS_TTL = 25 * 60 * 1000;
 
 // =============================================================================
-// Models - exported for use by tests
+// Offline fallback models
 // =============================================================================
-
-type Backend = "anthropic" | "openai";
 
 interface GitLabModel {
 	id: string;
 	name: string;
-	backend: Backend;
 	baseUrl: string;
 	reasoning: boolean;
 	input: ("text" | "image")[];
@@ -55,12 +56,11 @@ interface GitLabModel {
 	maxTokens: number;
 }
 
-export const MODELS: GitLabModel[] = [
+const FALLBACK_MODELS: GitLabModel[] = [
 	// Anthropic
 	{
 		id: "claude-opus-4-5-20251101",
 		name: "Claude Opus 4.5",
-		backend: "anthropic",
 		baseUrl: ANTHROPIC_PROXY_URL,
 		reasoning: true,
 		input: ["text", "image"],
@@ -71,7 +71,6 @@ export const MODELS: GitLabModel[] = [
 	{
 		id: "claude-sonnet-4-5-20250929",
 		name: "Claude Sonnet 4.5",
-		backend: "anthropic",
 		baseUrl: ANTHROPIC_PROXY_URL,
 		reasoning: true,
 		input: ["text", "image"],
@@ -82,7 +81,6 @@ export const MODELS: GitLabModel[] = [
 	{
 		id: "claude-haiku-4-5-20251001",
 		name: "Claude Haiku 4.5",
-		backend: "anthropic",
 		baseUrl: ANTHROPIC_PROXY_URL,
 		reasoning: true,
 		input: ["text", "image"],
@@ -94,7 +92,6 @@ export const MODELS: GitLabModel[] = [
 	{
 		id: "gpt-5.1-2025-11-13",
 		name: "GPT-5.1",
-		backend: "openai",
 		baseUrl: OPENAI_PROXY_URL,
 		reasoning: true,
 		input: ["text", "image"],
@@ -105,7 +102,6 @@ export const MODELS: GitLabModel[] = [
 	{
 		id: "gpt-5-mini-2025-08-07",
 		name: "GPT-5 Mini",
-		backend: "openai",
 		baseUrl: OPENAI_PROXY_URL,
 		reasoning: true,
 		input: ["text", "image"],
@@ -116,7 +112,6 @@ export const MODELS: GitLabModel[] = [
 	{
 		id: "gpt-5-codex",
 		name: "GPT-5 Codex",
-		backend: "openai",
 		baseUrl: OPENAI_PROXY_URL,
 		reasoning: true,
 		input: ["text", "image"],
@@ -125,8 +120,6 @@ export const MODELS: GitLabModel[] = [
 		maxTokens: 16384,
 	},
 ];
-
-const MODEL_MAP = new Map(MODELS.map((m) => [m.id, m]));
 
 // =============================================================================
 // Direct Access Token Cache
@@ -138,11 +131,14 @@ interface DirectAccessToken {
 	expiresAt: number;
 }
 
-let cachedDirectAccess: DirectAccessToken | null = null;
+let cachedDirectAccess: (DirectAccessToken & { gitlabAccessToken: string }) | null = null;
 
-async function getDirectAccessToken(gitlabAccessToken: string): Promise<DirectAccessToken> {
+async function getDirectAccessToken(
+	gitlabAccessToken: string,
+	signal?: AbortSignal,
+): Promise<DirectAccessToken> {
 	const now = Date.now();
-	if (cachedDirectAccess && cachedDirectAccess.expiresAt > now) {
+	if (cachedDirectAccess?.gitlabAccessToken === gitlabAccessToken && cachedDirectAccess.expiresAt > now) {
 		return cachedDirectAccess;
 	}
 
@@ -150,6 +146,7 @@ async function getDirectAccessToken(gitlabAccessToken: string): Promise<DirectAc
 		method: "POST",
 		headers: { Authorization: `Bearer ${gitlabAccessToken}`, "Content-Type": "application/json" },
 		body: JSON.stringify({ feature_flags: { DuoAgentPlatformNext: true } }),
+		signal,
 	});
 
 	if (!response.ok) {
@@ -163,7 +160,12 @@ async function getDirectAccessToken(gitlabAccessToken: string): Promise<DirectAc
 	}
 
 	const data = (await response.json()) as { token: string; headers: Record<string, string> };
-	cachedDirectAccess = { token: data.token, headers: data.headers, expiresAt: now + DIRECT_ACCESS_TTL };
+	cachedDirectAccess = {
+		gitlabAccessToken,
+		token: data.token,
+		headers: data.headers,
+		expiresAt: now + DIRECT_ACCESS_TTL,
+	};
 	return cachedDirectAccess;
 }
 
@@ -234,7 +236,10 @@ async function loginGitLab(callbacks: OAuthLoginCallbacks): Promise<OAuthCredent
 	};
 }
 
-async function refreshGitLabToken(credentials: OAuthCredentials): Promise<OAuthCredentials> {
+async function refreshGitLabToken(
+	credentials: OAuthCredentials,
+	signal: AbortSignal,
+): Promise<OAuthCredentials> {
 	const response = await fetch(`${GITLAB_COM_URL}/oauth/token`, {
 		method: "POST",
 		headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -243,6 +248,7 @@ async function refreshGitLabToken(credentials: OAuthCredentials): Promise<OAuthC
 			grant_type: "refresh_token",
 			refresh_token: credentials.refresh,
 		}).toString(),
+		signal,
 	});
 	if (!response.ok) throw new Error(`Token refresh failed: ${await response.text()}`);
 	const data = (await response.json()) as {
@@ -254,6 +260,7 @@ async function refreshGitLabToken(credentials: OAuthCredentials): Promise<OAuthC
 	invalidateDirectAccessToken();
 	return {
 		refresh: data.refresh_token,
+		catalogOwner: oauthCatalogOwner(credentials),
 		access: data.access_token,
 		expires: (data.created_at + data.expires_in) * 1000 - 5 * 60 * 1000,
 	};
@@ -265,7 +272,7 @@ async function refreshGitLabToken(credentials: OAuthCredentials): Promise<OAuthC
 
 export function streamGitLabDuo(
 	model: Model<Api>,
-	context: Context,
+	context: TranscriptContext,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();
@@ -273,20 +280,27 @@ export function streamGitLabDuo(
 	(async () => {
 		try {
 			const gitlabAccessToken = options?.apiKey;
-			if (!gitlabAccessToken) throw new Error("No GitLab access token. Run /login gitlab-duo or set GITLAB_TOKEN");
+			if (!gitlabAccessToken)
+				throw new Error("No GitLab access token. Run /login gitlab-duo or set GITLAB_TOKEN");
 
-			const cfg = MODEL_MAP.get(model.id);
-			if (!cfg) throw new Error(`Unknown model: ${model.id}`);
+			const anthropic = model.baseUrl === ANTHROPIC_PROXY_URL;
+			if (!anthropic && model.baseUrl !== OPENAI_PROXY_URL)
+				throw new Error("Unsupported GitLab Duo proxy endpoint.");
 
-			const directAccess = await getDirectAccessToken(gitlabAccessToken);
-			const modelWithBaseUrl = { ...model, baseUrl: cfg.baseUrl };
+			const directAccess = await getDirectAccessToken(gitlabAccessToken, options?.signal);
 			const headers = { ...directAccess.headers, Authorization: `Bearer ${directAccess.token}` };
 			const streamOptions = { ...options, apiKey: "gitlab-duo", headers };
 
-			const innerStream =
-				cfg.backend === "anthropic"
-					? streamSimpleAnthropic(modelWithBaseUrl as Model<"anthropic-messages">, context, streamOptions)
-					: streamSimpleOpenAIResponses(modelWithBaseUrl as Model<"openai-responses">, context, streamOptions);
+			const innerStream = anthropic
+				? anthropicMessagesApi().streamSimple(
+						{
+							...(model as Model<"anthropic-messages">),
+							compat: { forceAdaptiveThinking: Boolean(model.thinkingLevelMap) },
+						},
+						context,
+						streamOptions,
+					)
+				: openAIResponsesApi().streamSimple(model as Model<"openai-responses">, context, streamOptions);
 
 			for await (const event of innerStream) stream.push(event);
 			stream.end();
@@ -327,17 +341,10 @@ export function streamGitLabDuo(
 export default function (pi: ExtensionAPI) {
 	pi.registerProvider("gitlab-duo", {
 		baseUrl: AI_GATEWAY_URL,
-		apiKey: "GITLAB_TOKEN",
+		apiKey: "$GITLAB_TOKEN",
 		api: "gitlab-duo-api",
-		models: MODELS.map(({ id, name, reasoning, input, cost, contextWindow, maxTokens }) => ({
-			id,
-			name,
-			reasoning,
-			input,
-			cost,
-			contextWindow,
-			maxTokens,
-		})),
+		models: FALLBACK_MODELS,
+		refreshModels: catalogRefresher(join(getAgentDir(), "gitlab-duo-models.json"), FALLBACK_MODELS),
 		oauth: {
 			name: "GitLab Duo",
 			login: loginGitLab,

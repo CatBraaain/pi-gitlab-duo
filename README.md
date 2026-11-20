@@ -1,65 +1,45 @@
 # pi-gitlab-duo
 
-GitLab Duo provider extension for [pi](https://github.com/badlogic/pi-mono).
+Use GitLab Duo's Claude and GPT models in [Pi](https://github.com/earendil-works/pi) through the GitLab AI Gateway.
 
-Provides access to GitLab Duo AI models (Claude and GPT) through GitLab's AI Gateway.
+## Install
 
-## Models
+In a checkout of this branch, run `bun install`. Add the checkout's absolute path to `~/.pi/agent/settings.json`, keeping any existing entries:
 
-| Model ID | Name |
-|----------|------|
-| `claude-opus-4-5-20251101` | Claude Opus 4.5 |
-| `claude-sonnet-4-5-20250929` | Claude Sonnet 4.5 |
-| `claude-haiku-4-5-20251001` | Claude Haiku 4.5 |
-| `gpt-5.1-2025-11-13` | GPT-5.1 |
-| `gpt-5-mini-2025-08-07` | GPT-5 Mini |
-| `gpt-5-codex` | GPT-5 Codex |
-
-All models support extended thinking/reasoning.
-
-## Installation
-
-```bash
-pi install npm:pi-gitlab-duo
+```json
+{
+  "packages": ["/path/to/pi-gitlab-duo"]
+}
 ```
 
-## Authentication
+This extension requires Pi 1.5.2 or later and an account with Duo access on GitLab.com.
 
-### OAuth (Recommended)
+## Log in
 
-```bash
-pi
-/login gitlab-duo
+1. Start Pi and run `/login gitlab-duo`. If the login picker opens, choose **GitLab Duo**.
+2. Authorize the application in your browser.
+3. Copy the full callback URL from the address bar and paste it into Pi.
+4. Run `/model` to choose a GitLab Duo model.
+
+Existing GitLab Duo OAuth logins still work. You do not need a personal access token. If you already use `GITLAB_TOKEN`, it remains supported as an alternative.
+
+## Models and refresh
+
+Pi checks for new models after login and when you open the model selector. The extension looks up available Duo Chat models with your GitLab credentials and matches them to the AI Gateway's public proxy definitions. New models appear without an extension update when both sources list them and they use a supported proxy.
+
+The last successful list is cached for the current login. A fresh cache avoids requests for 15 minutes unless Pi forces a refresh. On a refresh error, Pi keeps the last successful list, or the original built-in fallback models if discovery has never succeeded for this login. Opening `/model` after the cache expires checks again.
+
+`pi --list-models gitlab-duo` uses saved models or the fallback; it does not wait for a network refresh. To use just-discovered models from the CLI, refresh in an interactive session first.
+
+```sh
+pi --provider gitlab-duo --model <model-id>
 ```
 
-This will open GitLab's OAuth flow. After authorizing, copy the callback URL and paste it when prompted.
+## Limitations
 
-### Personal Access Token
-
-Set the `GITLAB_TOKEN` environment variable:
-
-```bash
-export GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
-pi --provider gitlab-duo --model claude-sonnet-4-5-20250929
-```
-
-## Usage
-
-```bash
-# Interactive mode
-pi --provider gitlab-duo --model claude-sonnet-4-5-20250929
-
-# With thinking enabled
-pi --provider gitlab-duo --model claude-sonnet-4-5-20250929 --thinking medium
-
-# Print mode
-pi --provider gitlab-duo --model claude-sonnet-4-5-20250929 -p "explain git rebase"
-```
-
-## Requirements
-
-- GitLab Duo subscription (Duo Pro or Duo Enterprise)
-- pi >= 0.49.0
+- GitLab.com and the Anthropic Messages and OpenAI Responses proxy routes are supported. Models without a matching route are not listed.
+- The Gateway can reject a listed model because of your Duo billing namespace, credits, or a difference between the deployed Gateway and its public definitions.
+- If GitLab does not publish input or reasoning capabilities for a new model, the extension uses text-only input and does not enable reasoning by default. Unavailable prices are not estimated.
 
 ## License
 
